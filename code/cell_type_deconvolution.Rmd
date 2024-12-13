@@ -1,0 +1,559 @@
+---
+title: "Cell type deconvolution in colitis-associated colorectal cancer mouse model"
+author: "Carlos Gallardo"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+editor_options: 
+  chunk_output_type: inline
+output:
+  pdf_document:
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+# set path
+path <- strsplit(dirname(rstudioapi::getActiveDocumentContext()$path), '/')[[1]]
+path <- path[-c((length(path)-0):length(path))]
+path <- paste(path, collapse = '/')
+knitr::opts_knit$set(root.dir = path)
+knitr::opts_chunk$set(echo = T, message = F, warning = F, dev = 'cairo_pdf')
+def.chunk.hook  <- knitr::knit_hooks$get("chunk")
+knitr::knit_hooks$set(chunk = function(x, options) {
+  size <- 'scriptsize'
+  x <- def.chunk.hook(x, options)
+  paste0("\n \\", size, "\n\n", x, "\n\n \\normalsize")
+})
+
+```
+
+```{r}
+# source and library import
+source('code/helper_functions.R')
+
+library(tidyverse)
+library(magrittr)
+library(Seurat)
+library(SeuratDisk)
+library(biomaRt)
+library(DESeq2)
+library(patchwork)
+
+```
+
+
+# Bulk RNA-seq data
+
+```{r}
+RNAseq <- list()
+
+RNAseq[['counts']] <- read.table('data/bulkRNAseq/counts_15.csv',
+                                 header = T,
+                                 sep = ',') %>% 
+  tibble::column_to_rownames(var = 'X') %>% 
+  dplyr::rename(!!!setNames(colnames(.),
+                            nm = gsub('^(.+)Aligned.+$','\\1', colnames(.))))
+
+RNAseq[['sample_meta']] <- read.table('data/bulkRNAseq/sample_information_15.csv',
+                                      header = T,
+                                      sep = ';')
+
+RNAseq[['gene_meta']] <- read.table('data/bulkRNAseq/ensembl_mmus_dec2017_annotation.tsv',
+                                    header = T,
+                                    sep = '\t',
+                                    quote = "")
+
+```
+
+
+## QC and filtering
+
+```{r}
+# Preprocessing - Filtering zero-count genes
+paste("Raw gene count:", nrow(RNAseq$counts))
+tokeep <- rowSums(RNAseq$counts) > 0
+paste("Non-zero gene count:", sum(tokeep))
+RNAseq$counts <- RNAseq$counts[tokeep,]
+RNAseq$gene_meta <- RNAseq$gene_meta[RNAseq$gene_meta$ensembl_gene_id %in% rownames(RNAseq$counts),]
+
+rm(tokeep)
+```
+
+
+> Only sample *P17508_177* has less than 10M counts. Belongs to vehicle wt females.
+
+```{r, fig.height=5, fig.width=12}
+# library sizes
+df <- RNAseq$sample_meta %>% 
+  mutate(lib.size = colSums(RNAseq$counts)) %>% 
+  mutate(sample = factor(.$sample, levels = .$sample))
+
+ggplot(df, aes(x=sample, y=lib.size/1e6, fill=group)) +
+  geom_bar(stat = "identity", width = 0.8) +
+  xlab("") +
+  ylab("Library size (million reads)") +
+  scale_x_discrete(expand =expansion(mult = c(.02, .02))) +
+  scale_y_continuous(expand =expansion(mult = c(.02, .05))) +
+  theme_bw() +
+  theme(axis.text.x.bottom = element_text(angle = 90, hjust = 1, vjust = 0.3))
+
+```
+
+
+> Chose expression cutoff to filter low-abundance genes. Those with more than 0.5 cpm
+> in at least 25 samples are kept.
+
+```{r, fig.height=5, fig.width=12}
+RNAseq[["cpm"]] <- normalizeData(RNAseq$counts,
+                                 method = "CPM")
+
+abovethresh <- RNAseq$cpm > 0.5
+
+df <- data.frame(samples = factor(seq(0,nrow(RNAseq$sample_meta)), 
+                                  levels = rev(seq(0,nrow(RNAseq$sample_meta)))),
+                 genes = c(table(rowSums(abovethresh)))) %>% 
+  mutate(cumulative = rev(cumsum(rev(genes)))) %>% 
+  mutate(remaining = sum(genes)-cumulative) %>% 
+  pivot_longer(cols = c("cumulative","remaining"),
+               names_to = "group") %>% 
+  mutate(group = factor(group, levels = c("remaining", "cumulative")))
+
+ggplot(data=df, aes(x=samples, y=value, fill=group)) +
+  geom_bar(color="black", size=0.5, width=0.8, position="stack", stat="identity") +
+  # geom_line(data=df, aes(x=samples, y=cumsum(genes), group=1),  size=1) +
+  # geom_point(data=df, aes(x=samples, y=cumsum(genes)), shape=21, size=2, stroke=1, color="black", fill="white") +
+  # geom_hline(yintercept = 20000, linetype="solid", size=1, color="grey50") +
+  geom_hline(yintercept = unlist(df[df$samples == "24" & df$group == "cumulative", "value"]),
+             linetype="solid", size=1, color="#EF2126") +
+  geom_vline(xintercept = "24", linetype="solid", size=1, color="#EF2126") +
+  xlab("# of samples present (CPM>0.5)") +
+  ylab("# of genes") +
+  scale_x_discrete(expand =expansion(mult = c(.02, .02))) +
+  scale_y_continuous(expand =expansion(mult = c(.02, .00)),
+                     limits = c(0,35000), breaks = seq(0,40000,10000)) +
+  scale_fill_manual(values = c("grey80", "grey20")) +
+  theme_bw()
+
+
+```
+
+```{r}
+tokeep <- rowSums(abovethresh) >= 24
+paste("Pre-filtering gene count:", length(tokeep))
+paste("Genes below abundance threshold:", length(tokeep)-sum(tokeep))
+paste("Remaining genes:", sum(tokeep))
+
+```
+
+```{r}
+# Filter genes
+RNAseq$counts <- RNAseq$counts[tokeep,]
+RNAseq$gene_meta <- RNAseq$gene_meta[RNAseq$gene_meta$ensembl_gene_id %in% rownames(RNAseq$counts),]
+
+# Normalize
+RNAseq$cpm <- normalizeData(RNAseq$counts,
+                            method = "CPM")
+
+```
+
+
+> Distributions of gene expression per sample look ok.
+
+```{r, fig.height=6, fig.width=12}
+df <- RNAseq$cpm %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  tibble::rownames_to_column(var = 'sample') %>% 
+  left_join(RNAseq$sample_meta, by = 'sample') %>% 
+  tidyr::pivot_longer(cols = c(2:(nrow(RNAseq$cpm)+1)),
+                      names_to = 'geneID',
+                      values_to = 'cpm') %>% 
+  mutate(sample = factor(.$sample, levels = RNAseq$sample_meta$sample)) %>% 
+  mutate(counts = RNAseq$counts %>% 
+           t() %>% 
+           as.data.frame() %>% 
+           tibble::rownames_to_column(var = 'sample') %>% 
+           left_join(RNAseq$sample_meta, by = 'sample') %>% 
+           tidyr::pivot_longer(cols = c(2:(nrow(RNAseq$counts)+1)),
+                               names_to = 'geneID',
+                               values_to = 'counts') %>% 
+           pull(counts))
+
+ggplot(df, aes(x=sample, y=log2(cpm+1), fill=group)) +
+  geom_violin(scale = "area") +
+  xlab("") +
+  ylab(expression(Log[2](CPM+1))) +
+  scale_x_discrete(expand =expansion(mult = c(.02, .02))) +
+  scale_y_continuous(expand =expansion(mult = c(.02, .05))) +
+  theme_bw() +
+  theme(
+    axis.text.x.bottom = element_text(angle = 90, hjust = 1, vjust = 0.3),
+    legend.position = "top")
+
+```
+
+
+> Overall trascriptomes correlate well for samples from the same condition. Major differences are found
+> between epithelial scrapes and tumor samples. However, some scrape samples match well the gene expression
+> of tumor samples (e.g., P17508_175).
+
+```{r}
+RNAseq$sample_meta
+
+```
+
+```{r, fig.height=9, fig.width=10}
+df <- cor(RNAseq$cpm, method = "spearman") %>% 
+  as.data.frame() %>% 
+  rownames_to_column(var = "sample1") %>% 
+  mutate(across(everything(), as.character)) %>% 
+  pivot_longer(cols = c(2:length(.)),
+               names_to = "sample2") %>% 
+  dplyr::rename(r = value) %>% 
+  mutate(sample1 = factor(sample1, levels = names(RNAseq$counts)),
+         sample2 = factor(sample2, levels = names(RNAseq$counts)),
+         r = as.numeric(r))
+
+ggplot(df, aes(x=sample1, y=sample2, fill= r)) + 
+  geom_tile() +
+  scale_y_discrete(limits=rev) +
+  scale_fill_gradientn(colours = alpha(rev(c("#000004", "#420A68", "#932667", "#DD513A", "#FCA50A", "#FCFFA4")), 1)) +
+  theme_bw() +
+  theme(
+    axis.text.x.bottom = element_text(angle = 90, hjust = 1, vjust = 0.3),
+    legend.position = "right",
+    legend.justification = "top"
+  )
+
+```
+
+
+## PCA plots
+
+```{r}
+dsdata <- DESeqDataSetFromMatrix(countData = RNAseq$counts,
+                                 colData = RNAseq$sample_meta,
+                                 design = ~treatment + genotype + sex + tissue)
+dsdata <- estimateSizeFactors(dsdata)
+
+RNAseq[["DESeq_norm"]] <- counts(dsdata, normalized=TRUE) %>% as.data.frame()
+RNAseq[["DESeq_vst"]] <- assay(vst(dsdata, blind=FALSE)) %>% as.data.frame()
+RNAseq[["DESeq_rlog"]] <- assay(rlog(dsdata, blind=FALSE)) %>% as.data.frame()
+
+```
+
+
+> From PCA plots below we see that PC1 (~74% variation) seppparates samples well into
+> two groups based on if they are from tumors or epithelial scrapes. PC2 (~10% variation)
+> can separate vehicle from AOM-DSS treated conditions.
+
+```{r, fig.width=12, fig.height=6}
+pca_res <- doPCA(RNAseq$DESeq_vst, top_var = 500)
+df <- pca_res$pcs %>% 
+  dplyr::bind_cols(RNAseq$sample_meta)
+
+p <- setNames(c('treatment','genotype','sex','tissue'),
+              c('treatment','genotype','sex','tissue')) %>% 
+  as.list()
+
+p <- lapply(p, function(x){
+  ggplot(df, aes(x=PC1, y=PC2, fill=get(x))) +
+    geom_point(color="black", shape=21, size=4, stroke=1.5, alpha=0.6) +
+    xlab(paste0('PC1 (',round(pca_res$perc_var[[1]],2),'%)')) +
+    ylab(paste0('PC2 (',round(pca_res$perc_var[[2]],2),'%)')) +
+    theme_bw()
+})
+
+patchwork::wrap_plots(p, ncol = 2)
+
+```
+
+### Genes associated to PC1:
+
+```{r}
+# reports that Cyp2c55 protects in colon cancer
+# Mmp7, Nkd1 are tumor markers
+df <- as.data.frame(pca_res$rotation) %>% 
+  rownames_to_column(var = "GeneSymbol") %>% 
+  dplyr::mutate(GeneSymbol = dplyr::recode(GeneSymbol,
+                                           !!!setNames(RNAseq$gene_meta$external_gene_name,
+                                                       RNAseq$gene_meta$ensembl_gene_id))) %>% 
+  dplyr::select(GeneSymbol, PC1) %>%
+  mutate(sign = sign(PC1)) %>% 
+  mutate(PC1 = abs(PC1)) %>% 
+  arrange(desc(PC1))
+
+head(df, 20)
+
+```
+
+### Genes associated to PC2:
+
+```{r}
+# Reg3b promotes proliferation 
+# Tgm3 is a tumor supressor (epithelial-to-mesenchymal transition and PI3K/AKT signaling)
+df <- as.data.frame(pca_res$rotation) %>% 
+  rownames_to_column(var = "GeneSymbol") %>% 
+  dplyr::mutate(GeneSymbol = dplyr::recode(GeneSymbol,
+                                           !!!setNames(RNAseq$gene_meta$external_gene_name,
+                                                       RNAseq$gene_meta$ensembl_gene_id))) %>% 
+  dplyr::select(GeneSymbol, PC2) %>%
+  mutate(sign = sign(PC2)) %>% 
+  mutate(PC2 = abs(PC2)) %>% 
+  arrange(desc(PC2))
+
+head(df, 20)
+
+```
+
+
+# Single cell RNA-seq data
+
+Matching single cell data from [Vega et al. 2022](https://doi.org/10.3389/fonc.2022.878920)
+with annotations obtained from authors. Sample conditions include:
+
+* Wild type
+* APC tumor ($Lrig1^{CreERT2/+};Apc^{fl/+}$)
+* APC adjacent
+* AOM/DSS tumor (inflammation-driven)
+
+> Whole dataset contains 12804 cells across the different conditions.
+
+```{r}
+# load h5 object provided by authors
+sc_dat <- LoadH5Seurat('data/scRNAseq/Vega_et_al_2022_CAF.h5Seurat')
+
+# add cell type annotation as indicated by authors
+cluster_number <- 1:17
+cell_annotation <- c('macrophage', 'CAF2', 'CAF1', 'AOM_tumor',
+                     'Paneth-like', 'squamous', 'stem', 'T_cell',
+                     'APC_tumor', 'plasma', 'endothelial', 'neutrophil',
+                     'erythroid', 'colonocyte', 'goblet', 'B cell', 
+                     'enteroendocrine')
+sc_dat@meta.data <- sc_dat@meta.data %>% 
+  dplyr::mutate(cl_num = sc_dat@active.ident) %>% 
+  dplyr::mutate(cell_annot = dplyr::recode(cl_num, 
+                                           !!!setNames(cell_annotation, 
+                                                       cluster_number)))
+
+sc_dat
+
+```
+
+
+> UMAP plots found in publication are reproducible.
+
+```{r, fig.width=12, fig.height=4}
+p <- list()
+
+# umap with clusters by color
+p[[1]] <- DimPlot(object = sc_dat, 
+                  reduction = "umap", 
+                  cols = c( 'darkred', 'salmon', 'sienna3', 'firebrick3', 'palevioletred', 
+                            'goldenrod', "lightpink", 'grey56', 'black', 'darkorchid4', 
+                            'slateblue', 'cornflowerblue', 'lightskyblue','midnightblue', 
+                            'blue', 'darkgreen', 'palegreen3'), 
+                  group.by = "cell_annot",
+                  label = TRUE) + 
+  labs(title = NULL)
+
+# umap with sample type by color
+p[[2]] <- DimPlot(object = sc_dat, 
+                  reduction = "umap", 
+                  group.by = "orig.ident", 
+                  cols = c("red", "blue", "darkgrey", "black")) + 
+  labs(title = NULL)
+
+patchwork::wrap_plots(p, ncol = 2)
+
+```
+
+
+## Cell distribution across conditions
+
+> From all available, cells from wildtype and AOM_DSS samples are relevant for us. Cells
+> derived from the APC model will be excluded and will not used for deconvolution.
+>
+> Ideally, we would build **gene expression signatures** that are specific to cell types in each
+> condition (i.e., vehicle- and aom-dss-treated) and use these for the deconvulution of matching
+> bulk RNA-seq samples. However, the abundance distribution of cell types looks very different 
+> in these two conditions (see top left and bottom right bar plots below). This would not be a
+> problem if more cells were available in this dataset but it is here because some cell types end up
+> with very low counts (affects building a robust signature) or none at all. We proceed to build the 
+> signature on the combined dataset for enhanced representation and robustness.
+
+```{r, fig.width=12, fig.height=6}
+p <- list()
+
+df <- sc_dat@meta.data %>% 
+  filter(orig.ident == 'AOM_DSS') %>% 
+  pull(cell_annot) %>% 
+  table() %>% 
+  as.data.frame()
+
+colnames(df) <- c('cell', 'Freq')
+
+p[[1]] <- ggplot(df, aes(x=cell, y=Freq, label=Freq)) +
+  geom_bar(stat='identity', fill='red') +
+  geom_text(size=3, vjust=-0.2) +
+  ggtitle('AOM_DSS') +
+  theme_bw() +
+  theme(axis.text.x.bottom = element_text(angle = 45, hjust = 1, vjust = 1))
+
+df <- sc_dat@meta.data %>% 
+  filter(orig.ident == 'APC') %>% 
+  pull(cell_annot) %>% 
+  table() %>% 
+  as.data.frame() 
+
+colnames(df) <- c('cell', 'Freq')
+
+p[[2]] <- ggplot(df, aes(x=cell, y=Freq, label=Freq)) +
+  geom_bar(stat='identity', fill='blue') +
+  geom_text(size=3, vjust=-0.2) +
+  ggtitle('APC') +
+  theme_bw() +
+  theme(axis.text.x.bottom = element_text(angle = 45, hjust = 1, vjust = 1))
+
+df <- sc_dat@meta.data %>% 
+  filter(orig.ident == 'APC_adj') %>% 
+  pull(cell_annot) %>% 
+  table() %>% 
+  as.data.frame() 
+
+colnames(df) <- c('cell', 'Freq')
+
+p[[3]] <- ggplot(df, aes(x=cell, y=Freq, label=Freq)) +
+  geom_bar(stat='identity', fill='darkgrey') +
+  geom_text(size=3, vjust=-0.2) +
+  ggtitle('APC_adj') +
+  theme_bw() +
+  theme(axis.text.x.bottom = element_text(angle = 45, hjust = 1, vjust = 1))
+
+df <- sc_dat@meta.data %>% 
+  filter(orig.ident == 'wildtype') %>% 
+  pull(cell_annot) %>% 
+  table() %>% 
+  as.data.frame() 
+
+colnames(df) <- c('cell', 'Freq')
+
+p[[4]] <- ggplot(df, aes(x=cell, y=Freq, label=Freq)) +
+  geom_bar(stat='identity', fill='black') +
+  geom_text(size=3, vjust=-0.2) +
+  ggtitle('wildtype') +
+  theme_bw() +
+  theme(axis.text.x.bottom = element_text(angle = 45, hjust = 1, vjust = 1))
+
+patchwork::wrap_plots(p, ncol = 2)
+
+```
+
+
+# Cell type deconvolution
+
+For the deconvolution, we apply the CIBERSORTx method (available at https://cibersortx.stanford.edu/).
+For information on the method check the publication [Newman et al. 2019](https://doi.org/10.1038/s41587-019-0114-2).
+
+## Export input data for CIBERSORTx
+
+### Single-cell count matrix (wildtype and AOM-DSS cells)
+
+```{r}
+dat <- sc_dat@assays$RNA@counts
+dat <- GetAssayData(sc_dat, assay = "RNA", slot = "counts")
+df <- sc_dat@meta.data %>% 
+  tibble::rownames_to_column(var = 'cell_id') %>% 
+  dplyr::filter(orig.ident %in% c('AOM_DSS','wildtype')) %>% 
+  dplyr::filter(cell_annot != 'APC_tumor') %>% 
+  dplyr::mutate(cell_annot = dplyr::recode(cell_annot, 'CAF1' = 'CAF', 'CAF2' = 'CAF')) %>% 
+  dplyr::mutate(cell_annot = as.character(cell_annot))
+
+features <- intersect(rownames(dat), 
+                      RNAseq$gene_meta$external_gene_name)
+
+dat <- dat[features, df$cell_id] %>% 
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  rownames_to_column(var = 'geneID')
+
+# write.table(dat,
+#             file="data/CIBERSORTx/CIBERSORTx_single_cell_Vega2022_counts.txt",
+#             row.names=FALSE, 
+#             col.names=c('geneID', df$cell_annot), 
+#             sep="\t", 
+#             quote = FALSE)
+
+```
+
+
+### Bulk RNA-seq count matrix
+
+```{r}
+df <- RNAseq$counts %>% 
+  as.data.frame() %>% 
+  rownames_to_column(var = 'geneID') %>% 
+  dplyr::mutate(geneID = dplyr::recode(geneID,
+                                       !!!setNames(RNAseq$gene_meta$external_gene_name,
+                                                   RNAseq$gene_meta$ensembl_gene_id))) %>% 
+  dplyr::filter(!duplicated(geneID))
+
+# write.table(df,
+#             file="data/CIBERSORTx/CIBERSORTx_bulkRNAseq_counts.txt",
+#             row.names=FALSE, 
+#             col.names=TRUE, 
+#             sep="\t", 
+#             quote = FALSE)
+
+```
+
+
+## CIBERSORTx deconvolution results
+
+```{r, fig.width=12, fig.height=6}
+df <- read.table(file = 'results/CIBERSORTx_deconvolution_cell_type_fractions.txt',
+                 header = TRUE,
+                 sep = '\t',
+                 quote = '') %>% 
+  column_to_rownames(var = 'Mixture') %>% 
+  round(4)
+
+df <- cbind(RNAseq$sample_meta, df)
+
+celltypes <- sc_dat@meta.data %>% 
+  dplyr::filter(orig.ident %in% c('AOM_DSS','wildtype')) %>% 
+  dplyr::filter(cell_annot != 'APC_tumor') %>% 
+  dplyr::mutate(cell_annot = dplyr::recode(cell_annot, 'CAF1' = 'CAF', 'CAF2' = 'CAF', 
+                                           'Paneth-like' = 'Paneth.like', 'B cell' = 'B.cell')) %>% 
+  dplyr::mutate(cell_annot = as.character(cell_annot)) %>% 
+  dplyr::pull(cell_annot) %>% 
+  unique()
+
+df2 <- lapply(setNames(celltypes, nm = celltypes), function(x){
+  df %>% 
+    group_by(group) %>% 
+    dplyr::select(group, x) %>% 
+    summarize_each(funs(mean, sd, se=sd(.)/sqrt(n())), x) %>% 
+    mutate(cell_annot = x)
+}) %>% 
+  bind_rows() %>% 
+  left_join(df %>% 
+              dplyr::select(group, treatment, genotype, sex, tissue) %>% 
+              dplyr::filter(!duplicated(group)), 
+            by = 'group')
+
+ggplot(df2, aes(x=cell_annot, y=mean, fill=group, ymin=mean-se, ymax=mean+se)) +
+  geom_errorbar(width=.6, lwd=1, position = position_dodge(width=0.9)) +
+  geom_bar(stat='identity', position = position_dodge(), col='black') +
+  facet_wrap(~sex, ncol=1) +
+  ggtitle('CIBERSORTx') +
+  theme_bw() +
+  theme(axis.text.x.bottom = element_text(angle = 45, hjust = 1, vjust = 1))
+
+```
+
+
+# SessionInfo
+
+```{r}
+sessionInfo()
+
+```

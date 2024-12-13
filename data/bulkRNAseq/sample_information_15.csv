@@ -1,0 +1,59 @@
+sample;animal_id;group;treatment;genotype;sex;tissue
+P17508_112;17CW17:5 S;FKOTreated15S;aom_dss;ko;female;epithelial_scrape
+P17508_119;17CW30:2 S;FKOTreated15S;aom_dss;ko;female;epithelial_scrape
+P17508_124;17CW30:3 S;FKOTreated15S;aom_dss;ko;female;epithelial_scrape
+P17508_153;17CW9:2 S;FKOTreated15S;aom_dss;ko;female;epithelial_scrape
+P17508_175;17CW30:4 S;FKOTreated15S;aom_dss;ko;female;epithelial_scrape
+P17508_103;17CW30:3 T;FKOTreated15T;aom_dss;ko;female;tumor
+P17508_105;17CW9:2 T;FKOTreated15T;aom_dss;ko;female;tumor
+P17508_161;17CW17:5 T;FKOTreated15T;aom_dss;ko;female;tumor
+P17508_164;17CW30:4 T;FKOTreated15T;aom_dss;ko;female;tumor
+P17508_125;18CW28:1;FKOVehicle9;vehicle;ko;female;epithelial_scrape
+P17508_147;18CW28:3;FKOVehicle9;vehicle;ko;female;epithelial_scrape
+P17508_152;17CW52:1;FKOVehicle9;vehicle;ko;female;epithelial_scrape
+P17508_170;17CW52:3;FKOVehicle9;vehicle;ko;female;epithelial_scrape
+P17508_172;18CW5:4;FKOVehicle9;vehicle;ko;female;epithelial_scrape
+P17508_115;17CW28:4 S;FWTTreated15S;aom_dss;wt;female;epithelial_scrape
+P17508_121;17CW9:1 S;FWTTreated15S;aom_dss;wt;female;epithelial_scrape
+P17508_130;17CW28:1 S;FWTTreated15S;aom_dss;wt;female;epithelial_scrape
+P17508_133;17CW9:3 S;FWTTreated15S;aom_dss;wt;female;epithelial_scrape
+P17508_158;17CW19:1 S;FWTTreated15S;aom_dss;wt;female;epithelial_scrape
+P17508_109;17CW9:1 T;FWTTreated15T;aom_dss;wt;female;tumor
+P17508_113;17CW9:3 T;FWTTreated15T;aom_dss;wt;female;tumor
+P17508_117;17CW28:1 T;FWTTreated15T;aom_dss;wt;female;tumor
+P17508_126;17CW19:1 T;FWTTreated15T;aom_dss;wt;female;tumor
+P17508_156;17CW28:4 T;FWTTreated15T;aom_dss;wt;female;tumor
+P17508_140;17CW52:4;FWTVehicle9;vehicle;wt;female;epithelial_scrape
+P17508_159;17CW21:4;FWTVehicle9;vehicle;wt;female;epithelial_scrape
+P17508_160;17CW20:2;FWTVehicle9;vehicle;wt;female;epithelial_scrape
+P17508_168;18CW5:1;FWTVehicle9;vehicle;wt;female;epithelial_scrape
+P17508_177;17CW15:1;FWTVehicle9;vehicle;wt;female;epithelial_scrape
+P17508_104;17CW21:7 S;MKOTreated15S;aom_dss;ko;male;epithelial_scrape
+P17508_138;17CW19:8 S;MKOTreated15S;aom_dss;ko;male;epithelial_scrape
+P17508_148;17CW14:4 S;MKOTreated15S;aom_dss;ko;male;epithelial_scrape
+P17508_171;17CW14:7 S;MKOTreated15S;aom_dss;ko;male;epithelial_scrape
+P17508_176;17CW19:7 S;MKOTreated15S;aom_dss;ko;male;epithelial_scrape
+P17508_107;17CW14:7 T;MKOTreated15T;aom_dss;ko;male;tumor
+P17508_118;17CW14:4 T;MKOTreated15T;aom_dss;ko;male;tumor
+P17508_128;17CW19:8 T;MKOTreated15T;aom_dss;ko;male;tumor
+P17508_137;17CW19:7 T;MKOTreated15T;aom_dss;ko;male;tumor
+P17508_127;18CW12:6;MKOVehicle9;vehicle;ko;male;epithelial_scrape
+P17508_134;18CW21:2;MKOVehicle9;vehicle;ko;male;epithelial_scrape
+P17508_151;17CW48:4;MKOVehicle9;vehicle;ko;male;epithelial_scrape
+P17508_165;17CW48:2;MKOVehicle9;vehicle;ko;male;epithelial_scrape
+P17508_173;17CW47:7;MKOVehicle9;vehicle;ko;male;epithelial_scrape
+P17508_101;17CW11:9 S;MWTTreated15S;aom_dss;wt;male;epithelial_scrape
+P17508_110;17CW11:7 S;MWTTreated15S;aom_dss;wt;male;epithelial_scrape
+P17508_114;17CW21:6 S;MWTTreated15S;aom_dss;wt;male;epithelial_scrape
+P17508_146;17CW21:8 S;MWTTreated15S;aom_dss;wt;male;epithelial_scrape
+P17508_149;17CW14:6 S;MWTTreated15S;aom_dss;wt;male;epithelial_scrape
+P17508_116;17CW11:7 T;MWTTreated15T;aom_dss;wt;male;tumor
+P17508_131;17CW21:8 T;MWTTreated15T;aom_dss;wt;male;tumor
+P17508_145;17CW11:9 T;MWTTreated15T;aom_dss;wt;male;tumor
+P17508_174;17CW21:6 T;MWTTreated15T;aom_dss;wt;male;tumor
+P17508_179;17CW14:6 T;MWTTreated15T;aom_dss;wt;male;tumor
+P17508_139;18CW28:7;MWTVehicle9;vehicle;wt;male;epithelial_scrape
+P17508_142;18CW28:4;MWTVehicle9;vehicle;wt;male;epithelial_scrape
+P17508_143;18CW12:4;MWTVehicle9;vehicle;wt;male;epithelial_scrape
+P17508_166;18CW25:6;MWTVehicle9;vehicle;wt;male;epithelial_scrape
+P17508_169;18CW7:7;MWTVehicle9;vehicle;wt;male;epithelial_scrape
