@@ -1,2 +1,4 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+*.h5Seurat filter=lfs diff=lfs merge=lfs -text
+*CIBERSORTx_single_cell_Vega2022_counts.txt filter=lfs diff=lfs merge=lfs -text
